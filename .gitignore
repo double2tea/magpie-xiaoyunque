@@ -1,0 +1,6 @@
+node_modules/
+acceptance-artifacts/
+*.tgz
+.DS_Store
+.env
+.env.*
