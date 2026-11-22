@@ -126,7 +126,7 @@ async function localMedia(body, directory) {
     if (typeof source !== "string") throw new Error("参考媒体须为字符串。")
     if (/^(https:|data:)/.test(source)) return source
     if (!isAbsolute(source)) throw new Error("本地参考素材请提供完整绝对路径。")
-    const path = await realpath(resolve(directory, source))
+    const path = await realpath(directory ? resolve(directory, source) : resolve(source))
     const details = await stat(path)
     if (!details.isFile() || details.size <= 0 || details.size >= 500_000_000) throw new Error("参考媒体须为小于 500 MB 的文件。")
     const mime = mimes[extname(path).toLowerCase()]

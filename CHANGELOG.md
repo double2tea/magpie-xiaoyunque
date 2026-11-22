@@ -1,5 +1,13 @@
 # 更新记录
 
+## 0.1.1
+
+- 修复 `/v1/videos` multipart 请求中 `image` 被错误归入参考图而非首帧的问题。
+- 图片组合 `size` 支持 `adaptive` 比例与小写分辨率（如 `adaptive@2K`、`16:9@2k`），修正参数覆盖提示误报。
+- 严格校验视频比例枚举，拒绝空白字符串隐式转为 `adaptive`；移除不可达死代码。
+- 修复 `accountAuth` 按任务恢复原账号时在异常条目或同 UID 多槽位下的边界错误。
+- 修复 `generate` 工具在缺少 `context.directory` 时读取本地绝对路径报错。
+
 ## 0.1.0 · 首个公开版本
 
 - 在 Magpie 供应商页通过网页登录或 Access Key 使用小云雀，凭据由 Magpie 保存。

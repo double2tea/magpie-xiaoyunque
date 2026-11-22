@@ -1,6 +1,6 @@
 {
   "name": "magpie-xiaoyunque",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "小云雀图片和视频供应商：网页登录或 Access Key、动态模型、积分和媒体生成",
   "repository": { "type": "git", "url": "git+https://github.com/double2tea/magpie-xiaoyunque.git" },
   "homepage": "https://github.com/double2tea/magpie-xiaoyunque#readme",

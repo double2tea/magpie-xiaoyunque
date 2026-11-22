@@ -1339,3 +1339,77 @@ test("result tool recovers the original account after another account is pinned"
   assert.equal(result.images[0].url, picture.data.image.url)
   await assert.rejects(createTools(service).result.execute({ id: started.id, account: "xiaoyunque#two" }, {}), /原小云雀账号/)
 })
+
+test("multipart video image field maps to first frame and conflicts with input_reference", async (context) => {
+  const { service, calls } = await fixture(context)
+  const form = new FormData()
+  form.set("model", video.key)
+  form.set("prompt", "首帧视频")
+  form.set("image", new Blob(["frame"], { type: "image/png" }), "frame.png")
+  const request = new Request("https://xyq.jianying.com/v1/videos", { method: "POST", body: form })
+  const response = await service.native(auth, request.url, {
+    method: "POST", headers: request.headers, body: new Uint8Array(await request.arrayBuffer()),
+  })
+  assert.equal(response.status, 200)
+  const submitted = JSON.parse(calls.find((call) => call.url.pathname.endsWith("submit_run")).init.body).video_part_tool_param
+  assert.equal(submitted.generate_type, 1)
+  assert.equal(submitted.images.length, 1)
+
+  const conflict = new FormData()
+  conflict.set("model", video.key)
+  conflict.set("prompt", "冲突")
+  conflict.set("image", new Blob(["a"], { type: "image/png" }), "a.png")
+  conflict.set("input_reference", new Blob(["b"], { type: "image/png" }), "b.png")
+  const conflictRequest = new Request("https://xyq.jianying.com/v1/videos", { method: "POST", body: conflict })
+  const conflictResponse = await service.native(auth, conflictRequest.url, {
+    method: "POST", headers: conflictRequest.headers, body: new Uint8Array(await conflictRequest.arrayBuffer()),
+  })
+  assert.equal(conflictResponse.status, 400)
+  assert.match((await conflictResponse.json()).error.message, /只填写一项/)
+})
+
+test("combined size accepts adaptive and lowercase K, avoids false override notices, and rejects blank video ratio", () => {
+  const adaptiveImage = {
+    ...image,
+    parameter_config: {
+      dimensions: [
+        { key: "ratio", option_list: [{ value: 0 }, { value: 2 }, { value: 6 }] },
+        { key: "resolution", option_list: [{ value: "2K" }] },
+      ],
+    },
+  }
+  assert.deepEqual(normalizeRequest("image", { prompt: "x", size: "adaptive@2K" }, adaptiveImage).params, { ratio: 0, resolution: "2K" })
+  assert.deepEqual(normalizeRequest("image", { prompt: "x", size: "16:9@2k" }, adaptiveImage).params, { ratio: 2, resolution: "2K" })
+  assert.equal(normalizeRequest("image", { prompt: "x", size: "1024x1024", resolution: "2K" }, adaptiveImage).adaptation, undefined)
+  assert.equal(normalizeRequest("image", { prompt: "x", size: "auto@2K", ratio: "16:9" }, adaptiveImage).adaptation, undefined)
+  assert.equal(normalizeRequest("video", { prompt: "x", size: "16:9", resolution: "720p" }, video).adaptation, undefined)
+  assert.match(normalizeRequest("video", { prompt: "x", size: "1280x720", resolution: "1080p" }, video).adaptation.message, /分辨率由 resolution 覆盖/)
+  assert.throws(() => normalizeRequest("video", { prompt: "x", ratio: "   " }, video), /视频比例不支持/)
+  assert.equal(modelRows([{ ...adaptiveImage, default_ratio: "" }])[adaptiveImage.name].supported_parameters.aspect_ratio.default, undefined)
+})
+
+test("accountAuth ignores incomplete unrelated entries and prefers active slot for duplicate UID", async (context) => {
+  const { service, directory } = await fixture(context)
+  await writeFile(join(directory, "plugin-auth.json"), JSON.stringify({
+    "xiaoyunque#broken": { type: "api" },
+    xiaoyunque: { ...auth, key: "old-key" },
+    "xiaoyunque#active": { ...auth, key: "new-key" },
+  }))
+  await writeFile(join(directory, "logins.json"), JSON.stringify([
+    { agent: "plugin:xiaoyunque", home: "xiaoyunque", user: "旧槽位", on: false },
+    { agent: "plugin:xiaoyunque", home: "xiaoyunque#active", user: "新槽位", first: true, on: true },
+  ]))
+  const selected = await service.api.accountAuth(undefined, credentials(auth).account)
+  assert.equal(selected.account, "xiaoyunque#active")
+  assert.equal(selected.auth.key, "new-key")
+})
+
+test("generate tool reads absolute local media without context.directory", async (context) => {
+  const { service, directory, calls } = await fixture(context)
+  await writeFile(join(directory, "plugin-auth.json"), JSON.stringify({ xiaoyunque: auth }))
+  const local = join(directory, "ref.png")
+  await writeFile(local, Buffer.from("png-bytes"))
+  const started = await createTools(service).generate.execute({ kind: "image", model: image.name, prompt: "x", image: local }, {})
+  assert.equal(started.status, "submitted")
+  assert.equal(calls.filter((call) => call.url.pathname.endsWith("upload_file")).length, 1)
+})

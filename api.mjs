@@ -152,10 +152,25 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
     const enabled = accounts.filter((entry) => !entry.login || (entry.login.on || entry.login.first) && !entry.login.paused && !entry.login.lapsed)
     enabled.sort((left, right) => Number(Boolean(right.login?.first)) - Number(Boolean(left.login?.first)) ||
       (left.login?.order ?? 0) - (right.login?.order ?? 0) || left.user.localeCompare(right.user))
-    const matches = account ? accounts.filter((entry) => [entry.id, entry.label, entry.user, store[entry.id].metadata?.email].includes(account)) :
-      taskAccount ? accounts.filter((entry) => fingerprint(store[entry.id].metadata?.uid ? `uid:${store[entry.id].metadata.uid}` : store[entry.id].key) === taskAccount) : enabled.slice(0, 1)
-    if (matches.length > 1) throw new VendorError("账号备注重复，请使用完整 Magpie 小云雀账号 ID。")
-    const selected = matches[0]
+    const identityKey = (entry) => {
+      const item = store[entry.id]
+      if (item?.metadata?.uid) return `uid:${item.metadata.uid}`
+      return typeof item?.key === "string" && item.key ? item.key : null
+    }
+    const byTask = (list) => list.filter((entry) => {
+      const idKey = identityKey(entry)
+      return idKey !== null && fingerprint(idKey) === taskAccount
+    })
+    let selected
+    if (account) {
+      const matches = accounts.filter((entry) => [entry.id, entry.label, entry.user, store[entry.id]?.metadata?.email].includes(account))
+      if (matches.length > 1) throw new VendorError("账号备注重复，请使用完整 Magpie 小云雀账号 ID。")
+      selected = matches[0]
+    } else if (taskAccount) {
+      selected = byTask(enabled)[0] ?? byTask(accounts)[0]
+    } else {
+      selected = enabled[0]
+    }
     if (!selected) throw new VendorError(taskAccount ? "请登录提交该任务的原小云雀账号。" : "没有可用的小云雀账号，请检查供应商页的账号开关。", 401)
     if (!enabled.includes(selected)) throw new VendorError("所选小云雀账号已关闭、暂停或失效，请在供应商页检查。", 403)
     credentials(store[selected.id])

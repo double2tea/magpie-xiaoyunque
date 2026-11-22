@@ -130,6 +130,7 @@ export function createService({ directory, fetchImpl = globalThis.fetch, pollMs 
     let active
     try {
       if (method === "POST" && ["/v1/images/generations", "/v1/images/edits", "/v1/videos"].includes(path)) {
+        const kind = path === "/v1/videos" ? "video" : "image"
         let body
         const contentType = new Headers(init.headers).get("content-type") ?? ""
         if (contentType.startsWith("multipart/form-data")) {
@@ -141,7 +142,7 @@ export function createService({ directory, fetchImpl = globalThis.fetch, pollMs 
             const field = key.replace(/\[\]$/, "")
             if (["image", "images", "reference_images", "reference_videos", "reference_audios"].includes(field)) {
               if (typeof value === "string" && value.trimStart().startsWith("[")) source = JSON.parse(value)
-              const target = field === "image" ? "images" : field
+              const target = field === "image" && kind === "image" ? "images" : field
               body[target] ??= []
               body[target].push(...(Array.isArray(source) ? source : [source]))
             } else {
@@ -150,7 +151,6 @@ export function createService({ directory, fetchImpl = globalThis.fetch, pollMs 
             }
           }
         } else body = JSON.parse(typeof init.body === "string" ? init.body : Buffer.from(init.body).toString("utf8"))
-        const kind = path === "/v1/videos" ? "video" : "image"
         active = await start(auth, kind, body, init.signal)
         if (kind === "video") return json(videoObject(active.task, active.id, "queued"))
         while (true) {
