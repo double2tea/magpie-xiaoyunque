@@ -57,7 +57,7 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
       const status = !response.ok ? response.status :
         /(?:登录|授权|access.?key|token.*(?:invalid|expired)|unauthorized)/i.test(message) ? 401 :
           /(?:积分.*不足|余额.*不足|insufficient)/i.test(message) ? 402 : 400
-      const errorData = response.ok && envelope.data && typeof envelope.data === "object" ? envelope.data : undefined
+      const errorData = response.ok && envelope.data && typeof envelope.data === "object" && !Array.isArray(envelope.data) ? envelope.data : undefined
       throw new VendorError(safeMessage(`${message}${envelope.log_id ? `（LogID: ${envelope.log_id}）` : ""}`, key), status, errorData)
     }
     if (!envelope.data || typeof envelope.data !== "object") throw new VendorError("小云雀响应缺少 data。", 502)
@@ -136,19 +136,20 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
     if (!directory) throw new Error("小云雀任务记录缺少配置目录。")
     const folder = join(directory, "xiaoyunque", "tasks")
     await mkdir(folder, { recursive: true, mode: 0o700 })
-    const path = join(folder, `${fingerprint(task.thread + ":" + task.run)}.json`)
+    const currentFile = `${fingerprint(task.thread + ":" + task.run)}.json`
+    const path = join(folder, currentFile)
     const temporary = `${path}.${randomBytes(8).toString("hex")}.tmp`
     await writeFile(temporary, JSON.stringify(task), { mode: 0o600, flag: "wx" })
     await rename(temporary, path)
     if (maxTasks > 0) {
       await (async () => {
-        const files = (await readdir(folder)).filter((file) => /^[a-f0-9]{24}\.json$/.test(file))
-        if (files.length <= maxTasks) return
+        const files = (await readdir(folder)).filter((file) => /^[a-f0-9]{24}\.json$/.test(file) && file !== currentFile)
+        if (files.length < maxTasks) return
         const dated = await Promise.all(files.map(async (file) => ({
           file, mtime: (await stat(join(folder, file)).catch(() => ({ mtimeMs: 0 }))).mtimeMs,
         })))
         dated.sort((left, right) => right.mtime - left.mtime)
-        await Promise.all(dated.slice(maxTasks).map(({ file }) => unlink(join(folder, file)).catch(() => {})))
+        await Promise.all(dated.slice(maxTasks - 1).map(({ file }) => unlink(join(folder, file)).catch(() => {})))
       })().catch(() => {})
     }
   }
@@ -215,12 +216,15 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
     return tasks.filter((task) => task.account === credentials(auth).account).sort((left, right) => right.created - left.created).slice(0, 20)
   }
   async function ensureWatermarkOff(auth, signal) {
+    signal?.throwIfAborted()
     const cacheKey = fingerprint(credentials(auth).key)
     if (watermarkDisabled.has(cacheKey)) return
     try {
       const data = await post(auth, "/api/biz/v1/skill/update_user_setting", { enabled: false }, { signal, teamId: "0" })
       if (data.enabled === false) watermarkDisabled.add(cacheKey)
-    } catch {}
+    } catch {
+      signal?.throwIfAborted()
+    }
   }
   return { post, models, spaces, upload, remember, accountAuth, recent, ensureWatermarkOff }
 }

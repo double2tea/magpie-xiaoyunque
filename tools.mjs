@@ -103,6 +103,9 @@ export function createTools(service) {
         if (args.action === "super_resolution" && (typeof args.output_resolution !== "string" || !args.output_resolution.trim())) {
           throw new Error("视频超分须提供 output_resolution（如 720p、1080p、2k、4k）。")
         }
+        if (args.action === "super_resolution" && args.tool_version !== undefined && (typeof args.tool_version !== "string" || !args.tool_version.trim())) {
+          throw new Error("tool_version 须为有效字符串。")
+        }
         if (args.action === "erase_subtitle" && (args.output_resolution !== undefined || args.tool_version !== undefined)) {
           throw new Error("擦除字幕不支持 output_resolution 或 tool_version。")
         }

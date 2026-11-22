@@ -20,6 +20,7 @@ export function createService({ directory, fetchImpl = globalThis.fetch, pollMs 
   }
   async function submitTask(auth, { kind, model, team, identity, path, body, adaptation }, signal) {
     await api.ensureWatermarkOff(auth, signal)
+    signal?.throwIfAborted()
     let submitted
     try {
       submitted = await api.post(auth, path, body, { signal, teamId: team })
@@ -219,34 +220,29 @@ export function createService({ directory, fetchImpl = globalThis.fetch, pollMs 
         if (kind === "video") return json(videoObject(active.task, active.id, "queued"))
         const deadline = AbortSignal.timeout(imageTimeoutMs)
         const polling = init.signal ? AbortSignal.any([init.signal, deadline]) : deadline
-        while (true) {
-          if (deadline.aborted && !init.signal?.aborted) throw new VendorError("图片生成等待超时。", 409)
-          polling.throwIfAborted()
-          let current
-          try {
+        let current
+        try {
+          while (true) {
+            polling.throwIfAborted()
             current = await result(auth, active.id, polling)
-          } catch (error) {
-            if (deadline.aborted && !init.signal?.aborted) throw new VendorError("图片生成等待超时。", 409)
-            throw error
-          }
-          if (current.status === "succeeded") {
-            if (!current.images.length) throw new Error("任务没有返回图片产物。")
-            const data = body.response_format === "url"
-              ? current.images.map((image) => ({ url: image.url }))
-              : await imageData(current.images, init.signal)
-            return json({
-              created: active.task.created, data,
-              ...(active.task.adaptation ? { adaptation: active.task.adaptation } : {}),
-            })
-          }
-          if (current.status !== "running") throw new Error(current.error || `任务状态为 ${current.status}，请在小云雀网页处理。`)
-          try {
+            if (current.status !== "running") break
             await wait(pollMs, undefined, { signal: polling })
-          } catch (error) {
-            if (deadline.aborted && !init.signal?.aborted) throw new VendorError("图片生成等待超时。", 409)
-            throw error
           }
+        } catch (error) {
+          if (deadline.aborted && !init.signal?.aborted) throw new VendorError("图片生成等待超时。", 409)
+          throw error
         }
+        if (current.status === "succeeded") {
+          if (!current.images.length) throw new Error("任务没有返回图片产物。")
+          const data = body.response_format === "url"
+            ? current.images.map((image) => ({ url: image.url }))
+            : await imageData(current.images, init.signal)
+          return json({
+            created: active.task.created, data,
+            ...(active.task.adaptation ? { adaptation: active.task.adaptation } : {}),
+          })
+        }
+        throw new Error(current.error || `任务状态为 ${current.status}，请在小云雀网页处理。`)
       }
       const route = /^\/v1\/videos\/([^/]+)(\/content)?$/.exec(path)
       if (method === "GET" && route) {

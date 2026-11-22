@@ -1070,7 +1070,7 @@ test("errors redact account secret and distinguish zero credit", async (context)
   assert.throws(() => decodeTask("xyq1_bad"), /任务/)
 })
 
-test("plugin offers browser and Access Key login, native loader, models, credits and three tools", async (context) => {
+test("plugin offers browser and Access Key login, native loader, models, credits and four tools", async (context) => {
   assert.equal(pluginEntry.server, XiaoyunquePlugin)
   const { directory } = await fixture(context)
   const hooks = await XiaoyunquePlugin({ directory })
@@ -1562,6 +1562,10 @@ test("video_process submits super-resolution and erase-subtitle with official mi
     /output_resolution/,
   )
   await assert.rejects(
+    tools.video_process.execute({ action: "super_resolution", video: "/missing/file.mp4", output_resolution: "2k", tool_version: "  " }, {}),
+    /tool_version/,
+  )
+  await assert.rejects(
     tools.video_process.execute({ action: "erase_subtitle", video: "/missing/file.mp4", output_resolution: "1080p" }, {}),
     /不支持/,
   )
@@ -1620,4 +1624,23 @@ test("video_process submits super-resolution and erase-subtitle with official mi
   const queried = await tools.result.execute({ id: erased.id }, {})
   assert.equal(queried.status, "succeeded")
   assert.equal(queried.videos[0].url, "https://media.example/video.mp4")
+})
+
+test("aborting during watermark disable stops before submit_run without 409", async (context) => {
+  const controller = new AbortController()
+  const setup = await fixture(context, {
+    fetch(url) {
+      if (url.pathname.endsWith("get_available_model_list")) return envelope({ scene: "web_image_agent", config: { models: [image] } })
+      if (url.pathname.endsWith("update_user_setting")) {
+        controller.abort(new Error("user cancelled"))
+        throw controller.signal.reason
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+  await assert.rejects(
+    setup.service.start(auth, "image", { model: image.name, prompt: "cancelled" }, controller.signal),
+    /user cancelled/,
+  )
+  assert.equal(setup.calls.filter((call) => call.url.pathname.endsWith("submit_run")).length, 0)
 })

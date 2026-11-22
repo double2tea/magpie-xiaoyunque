@@ -182,7 +182,7 @@ npm test
 npm run check
 ```
 
-Node 与 Bun 离线测试 96/96 通过；主要实测链路已覆盖两种登录、模型与积分读取、图片生成与参考图编辑、`effort` 与美学模型、普通视频、混合参考素材、首尾帧、Draft 样片转 1080p 成片以及原生 HTTP 媒体闭环。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+Node 与 Bun 离线测试 97/97 通过；主要实测链路已覆盖两种登录、模型与积分读取、图片生成与参考图编辑、`effort` 与美学模型、普通视频、混合参考素材、首尾帧、Draft 样片转 1080p 成片以及原生 HTTP 媒体闭环。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 参考
 
