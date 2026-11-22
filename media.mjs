@@ -1,4 +1,4 @@
-import { VendorError } from "./api.mjs"
+import { LOCAL_MEDIA, VendorError } from "./api.mjs"
 
 const RATIOS = new Map([[0, "adaptive"], [2, "16:9"], [3, "9:16"], [4, "4:3"], [5, "3:4"], [6, "1:1"], [7, "2:1"], [8, "2.35:1"], [9, "1.85:1"], [10, "1.125:2.436"], [11, "3:2"], [12, "2:3"], [13, "21:9"]])
 const own = (value, key) => Object.hasOwn(value, key)
@@ -185,6 +185,7 @@ export function describeModel(model) {
 }
 
 function sourceOf(value) {
+  if (value?.[LOCAL_MEDIA] && typeof value.path === "string" && typeof value.mime === "string") return value
   if (typeof value === "string" && value) return value
   if (value && typeof value.image_url === "string") return value.image_url
   if (value && typeof value.image_url?.url === "string") return value.image_url.url
@@ -456,7 +457,7 @@ export function buildSubmission(kind, normalized, model, assets) {
   return { agent_name: "pippit_video_part_agent", call_source: "pippit_cli", message: prompt, platform: "magpie", video_part_tool_param: settings }
 }
 
-export function parseRun(data, runId) {
+export function parseRun(data, runId, fallbackError) {
   const root = typeof data === "string" ? JSON.parse(data) : data
   const thread = root.thread
   if (!Array.isArray(thread?.run_list)) fail("小云雀任务响应缺少 run_list。")
@@ -494,7 +495,7 @@ export function parseRun(data, runId) {
       }
     }
   }
-  if (status === "failed" && !result.error) result.error = "小云雀生成失败。"
+  if (status === "failed" && !result.error) result.error = fallbackError || "小云雀生成失败。"
   if (status === "succeeded" && !result.images.length && !result.videos.length) fail("小云雀任务已结束，但未返回可下载产物。")
   return result
 }

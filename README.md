@@ -9,8 +9,8 @@
 - **原生媒体接入**：按当前账号实时拉取可用图片／视频模型、参数枚举与创作模式，直接出现在 Magpie 原生媒体入口。
 - **两种官方登录方式**：支持浏览器一键授权登录与 Access Key 登录，凭据由 Magpie 托管；走官方 Skill API，无 Cookie 后端。
 - **零外部依赖**：无需安装小云雀 CLI、无需手动填写 Base URL 或启动额外服务。
-- **三个进阶工具**：提供 `models`、`generate`、`result`，补足参考音视频、首尾帧、视频编辑／延长、任务恢复、本地保存和 Draft 样片升级。
-- **计费与幂等保护**：提交前完成全部参数校验与素材上传；已提交任务在查询或下载异常时绝不自动重提，下载不覆盖已有文件。
+- **四个进阶工具**：提供 `models`、`generate`、`video_process`、`result`，补足参考音视频、首尾帧、视频编辑／延长、视频超分、擦字幕、任务恢复、本地保存和 Draft 样片升级。
+- **默认无水印 & 计费保护**：首次提交时自动关闭账号 AIGC 水印（受服务端策略约束）；提交前完成全部校验与素材直传；已提交任务在查询或下载异常时绝不自动重提，下载不覆盖已有文件。
 
 ## 安装与登录
 
@@ -27,15 +27,16 @@ magpie plugin add github:double2tea/magpie-xiaoyunque
 
 登录成功后即可自动读取模型列表和积分余额。日常生图／生视频可直接使用 Magpie 原生入口；需要参考素材、首尾帧、视频编辑或 Draft 升级时，在 Magpie Library 中将插件工具分配给 Agent。
 
-## 三个插件工具
+## 四个插件工具
 
 | 工具 | 用途 |
 | --- | --- |
 | `models` | 查看当前账号可用模型、参数范围、创作模式及个人／团队空间 |
 | `generate` | 提交图片或视频生成，立即返回任务 `id` 与官方页面链接 |
+| `video_process` | 提交视频超分（`super_resolution`）或视频擦字幕（`erase_subtitle`），返回任务 `id` |
 | `result` | 查询进度、限时等待并下载到本地；不传 `id` 时列出本机最近 20 条任务 |
 
-典型调用顺序：`models` 查模型 → `generate` 提交任务 → `result` 查询与下载。
+典型调用顺序：`models` 查模型 → `generate` / `video_process` 提交任务 → `result` 查询与下载。
 
 ## 常见用法示例
 
@@ -112,6 +113,26 @@ magpie plugin add github:double2tea/magpie-xiaoyunque
 
 > 说明：模型能力严格区分“支持 / 不支持 / 未知”，未知限额不会伪造为 0；图片美学模型 V8.2 实测 `n: 1` 仍可能返回 4 张图，插件会完整保留所有产物。
 
+### 视频超分与擦字幕（`video_process`）
+
+```json
+// 视频超分（output_resolution: 720p | 1080p | 2k | 4k；tool_version 可选）
+{
+  "action": "super_resolution",
+  "video": "/完整绝对路径/待超分.mp4",
+  "output_resolution": "2k",
+  "tool_version": "professional_v2"
+}
+
+// 视频擦字幕
+{
+  "action": "erase_subtitle",
+  "video": "/完整绝对路径/带字幕.mp4"
+}
+```
+
+> 返回的任务 `id` 直接交给 `result` 查询进度并下载成品。
+
 ## Draft 样片与升级
 
 1. **生成样片**：选择模型 `Seedance_2.5_draft` 提交即可（自动生成 480p 样片，无需额外传 `draft: true`）。
@@ -149,7 +170,7 @@ magpie plugin add github:double2tea/magpie-xiaoyunque
 
 ## 限制与共存说明
 
-- **与另一个小云雀插件共存**：本插件与 `KasenRi/magpie-plugin-xiaoyunque` 共用供应商 ID `xiaoyunque`，**请只启用其中一个**。两者访问同一小云雀服务、同账号／空间下积分共享；本插件侧重 Magpie 原生模型目录与媒体路由（支持网页登录 + Access Key，无 Cookie 后端），同时保留三个工具。
+- **与另一个小云雀插件共存**：本插件与 `KasenRi/magpie-plugin-xiaoyunque` 共用供应商 ID `xiaoyunque`，**请只启用其中一个**。两者访问同一小云雀服务、同账号／空间下积分共享；本插件侧重 Magpie 原生模型目录与媒体路由（支持网页登录 + Access Key，无 Cookie 后端），同时保留四个工具。
 - **功能边界**：不提供服务端未开放的局部 `mask`、透明背景、输出格式转换或取消接口；Magpie 内置标准媒体工具无法表达全部扩展字段，复杂需求优先用插件 `generate`。
 - **运行环境**：Magpie 使用内置宿主，无需额外安装 Node.js；开发测试需 Node.js ≥ 22。同时提供 OpenCode 1.x / 2.x 入口（OpenCode 2.x 通用适配器不转接工具和积分，完整体验以 Magpie 为准）。
 - **验证边界**：团队空间计费、其他操作系统及音频听审暂未完整实测。
@@ -161,7 +182,7 @@ npm test
 npm run check
 ```
 
-Node 与 Bun 离线测试 89/89 通过；主要实测链路已覆盖两种登录、模型与积分读取、图片生成与参考图编辑、`effort` 与美学模型、普通视频、混合参考素材、首尾帧、Draft 样片转 1080p 成片以及原生 HTTP 媒体闭环。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+Node 与 Bun 离线测试 96/96 通过；主要实测链路已覆盖两种登录、模型与积分读取、图片生成与参考图编辑、`effort` 与美学模型、普通视频、混合参考素材、首尾帧、Draft 样片转 1080p 成片以及原生 HTTP 媒体闭环。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 参考
 

@@ -1,15 +1,17 @@
 import { createHash, randomBytes } from "node:crypto"
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises"
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 export const ORIGIN = "https://xyq.jianying.com"
 export const PROVIDER = "xiaoyunque"
+export const LOCAL_MEDIA = Symbol("xiaoyunque.local_media")
 export const fingerprint = (key) => createHash("sha256").update(key).digest("hex").slice(0, 24)
 
 export class VendorError extends Error {
-  constructor(message, status = 400) {
+  constructor(message, status = 400, data) {
     super(message)
     this.status = status
+    if (data !== undefined) this.data = data
   }
 }
 
@@ -19,8 +21,9 @@ export function credentials(auth) {
   return { key: auth.key, teamId: auth.metadata?.teamId ?? "0", account: fingerprint(auth.metadata?.uid ? `uid:${auth.metadata.uid}` : auth.key) }
 }
 
-export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.now } = {}) {
+export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.now, maxTasks = 200 } = {}) {
   const catalogs = new Map()
+  const watermarkDisabled = new Set()
   const safeMessage = (message, key) => String(message).split(key).join("[已隐藏密钥]").slice(0, 1000)
   async function post(auth, path, body, { signal, teamId = credentials(auth).teamId, multipart = false } = {}) {
     const { key } = credentials(auth)
@@ -54,7 +57,8 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
       const status = !response.ok ? response.status :
         /(?:登录|授权|access.?key|token.*(?:invalid|expired)|unauthorized)/i.test(message) ? 401 :
           /(?:积分.*不足|余额.*不足|insufficient)/i.test(message) ? 402 : 400
-      throw new VendorError(safeMessage(`${message}${envelope.log_id ? `（LogID: ${envelope.log_id}）` : ""}`, key), status)
+      const errorData = response.ok && envelope.data && typeof envelope.data === "object" ? envelope.data : undefined
+      throw new VendorError(safeMessage(`${message}${envelope.log_id ? `（LogID: ${envelope.log_id}）` : ""}`, key), status, errorData)
     }
     if (!envelope.data || typeof envelope.data !== "object") throw new VendorError("小云雀响应缺少 data。", 502)
     return envelope.data
@@ -96,8 +100,19 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
   }
   async function upload(auth, source, kind, { teamId, signal, index = 0 } = {}) {
     let data
-    if (typeof source !== "string") throw new VendorError("参考媒体须为 data URL 或 HTTPS 地址。")
-    if (source.startsWith("https://")) {
+    const extensions = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4", "video/webm": "webm", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/mp4": "m4a", "audio/ogg": "ogg" }
+    if (source?.[LOCAL_MEDIA] && typeof source.path === "string" && typeof source.mime === "string") {
+      if (!source.mime.startsWith(`${kind}/`)) throw new VendorError(`参考${kind}须为正确类型的媒体文件。`)
+      const extension = extensions[source.mime]
+      if (!extension) throw new VendorError(`不支持素材类型 ${source.mime}。`)
+      const bytes = await readFile(source.path)
+      if (!bytes.length || bytes.length >= 500_000_000) throw new VendorError("参考素材须大于 0 且小于 500 MB。")
+      const form = new FormData()
+      form.set("file", new Blob([bytes], { type: source.mime }), `reference-${index + 1}.${extension}`)
+      data = await post(auth, "/api/biz/v1/skill/upload_file", form, { signal, teamId, multipart: true })
+    } else if (typeof source !== "string") {
+      throw new VendorError("参考媒体须为 data URL 或 HTTPS 地址。")
+    } else if (source.startsWith("https://")) {
       const url = new URL(source)
       if (url.username || url.password || url.hash) throw new VendorError("参考媒体地址不得包含账号或 fragment。")
       data = await post(auth, "/api/biz/v1/skill/upload_file", { url: url.href }, { signal, teamId })
@@ -108,7 +123,6 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
       const bytes = Buffer.from(encoded, "base64")
       if (bytes.toString("base64").replace(/=+$/, "") !== encoded.replace(/=+$/, "")) throw new VendorError("参考素材 Base64 编码无效。")
       if (!bytes.length || bytes.length >= 500_000_000) throw new VendorError("参考素材须大于 0 且小于 500 MB。")
-      const extensions = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4", "video/webm": "webm", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/mp4": "m4a", "audio/ogg": "ogg" }
       const extension = extensions[match[1]]
       if (!extension) throw new VendorError(`不支持素材类型 ${match[1]}。`)
       const form = new FormData()
@@ -126,6 +140,17 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
     const temporary = `${path}.${randomBytes(8).toString("hex")}.tmp`
     await writeFile(temporary, JSON.stringify(task), { mode: 0o600, flag: "wx" })
     await rename(temporary, path)
+    if (maxTasks > 0) {
+      await (async () => {
+        const files = (await readdir(folder)).filter((file) => /^[a-f0-9]{24}\.json$/.test(file))
+        if (files.length <= maxTasks) return
+        const dated = await Promise.all(files.map(async (file) => ({
+          file, mtime: (await stat(join(folder, file)).catch(() => ({ mtimeMs: 0 }))).mtimeMs,
+        })))
+        dated.sort((left, right) => right.mtime - left.mtime)
+        await Promise.all(dated.slice(maxTasks).map(({ file }) => unlink(join(folder, file)).catch(() => {})))
+      })().catch(() => {})
+    }
   }
   async function accountAuth(account, taskAccount) {
     if (!directory) throw new Error("小云雀工具缺少 Magpie 配置目录。")
@@ -189,5 +214,13 @@ export function createAPI({ fetchImpl = globalThis.fetch, directory, now = Date.
       JSON.parse(await readFile(join(folder, file), "utf8"))))
     return tasks.filter((task) => task.account === credentials(auth).account).sort((left, right) => right.created - left.created).slice(0, 20)
   }
-  return { post, models, spaces, upload, remember, accountAuth, recent }
+  async function ensureWatermarkOff(auth, signal) {
+    const cacheKey = fingerprint(credentials(auth).key)
+    if (watermarkDisabled.has(cacheKey)) return
+    try {
+      const data = await post(auth, "/api/biz/v1/skill/update_user_setting", { enabled: false }, { signal, teamId: "0" })
+      if (data.enabled === false) watermarkDisabled.add(cacheKey)
+    } catch {}
+  }
+  return { post, models, spaces, upload, remember, accountAuth, recent, ensureWatermarkOff }
 }
